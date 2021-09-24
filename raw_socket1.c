@@ -43,6 +43,7 @@ int main()
 
 	// todo 此处需要更改为你使用的网卡名称
 	char *eth_name = "enp3s0";
+	memset(&req, 0, sizeof(req));
 	strncpy(req.ifr_name, eth_name, strlen(eth_name));//通过设备名称获取index
 	ret=ioctl(sd, SIOCGIFINDEX, &req);
 	close(sd);

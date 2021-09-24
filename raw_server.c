@@ -1,11 +1,11 @@
 /******************************************************************************
  *
- *       Filename:  raw_socket2.c
+ *       Filename:  raw_server.c
  *
- *    Description:  发送raw 网卡数据
+ *    Description:  接收raw socket 数据包
  *
- *        Version:  2.0
- *        Created:  2021年07月07日 20时27分51秒
+ *        Version:  1.0
+ *        Created:  2021年07月26日 19时24分47秒
  *       Revision:  none
  *       Compiler:  gcc
  *
@@ -21,11 +21,48 @@
 #include <arpa/inet.h>
 #include <netinet/ip.h> // ip head
 #include <netinet/udp.h> // udp head
+#include <signal.h>
+#include <stdlib.h>
 
 #include <unistd.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+
+static int running = 1;
+
+void sigint(int signum)
+{
+	if (!running){
+		exit(EXIT_FAILURE);
+	}
+	running = 0;
+}
+
+void sigalarm(int signum)
+{
+	if (!running){
+		exit(EXIT_FAILURE);
+	}
+	running = 0;
+}
+#define PACKET_SIZE 1000
+#ifndef ETH_P_WSMP
+	#define ETH_P_WSMP	0x88DC
+#endif
+void print_string_hex(char *buf, unsigned short length)
+{
+	int i =0;
+	printf("\n\t\t");
+	for( i = 0; i < length; i++){
+		printf(" %02X", (buf[i]&0xFF));
+		if( (i + 1) % 16 == 0 )
+		{
+			printf("\n\t\t");
+		}
+	}
+	printf("\n\n");
+}
 
 // 校验和函数
 unsigned short csum(unsigned short *buf, int nwords)
@@ -58,7 +95,6 @@ int main()
 
 	// todo 此处需要更改为你使用的网卡名称
 	char *eth_name = "enp3s0";
-	memset(&req, 0, sizeof(req));
 	strncpy(req.ifr_name, eth_name, strlen(eth_name));//通过设备名称获取index
 	ret=ioctl(sd, SIOCGIFINDEX, &req);
 	if(ret <0)
@@ -92,6 +128,25 @@ int main()
 		  printf("create socket error:%d.\n",errno); 
 		  return -11;
 	}
+
+	struct sockaddr_ll s_addr;
+	/* prepare sockaddr_ll */
+	memset(&s_addr, 0, sizeof(s_addr));
+	s_addr.sll_family   = AF_PACKET;
+	s_addr.sll_protocol = htons(ETH_P_WSMP);
+	s_addr.sll_ifindex  = req.ifr_ifindex;
+
+	/* bind to interface */
+	if (bind(SockFd, (struct sockaddr *) &s_addr, sizeof(s_addr)) == -1)
+	{
+		perror("error to bind:");
+		exit(EXIT_FAILURE);
+	}
+
+	//处理信号
+	/* enable signal */
+	signal(SIGINT, sigint);
+	signal(SIGALRM, sigalarm);
 
 	stTagAddr.sll_ifindex   = req.ifr_ifindex;//网卡eth0的index，非常重要，系统把数据往哪张网卡上发，就靠这个标识
 	stTagAddr.sll_pkttype   = PACKET_OUTGOING;//标识包的类型为发出去的包
@@ -168,6 +223,7 @@ int main()
 	/* Calculate IP checksum on completed header */
 	iph->check = csum((unsigned short *)(sendbuf+sizeof(struct ether_header)), sizeof(struct iphdr)/2);
 
+#if 0
 	// 这样网卡会把sebuff中的内容发送出去
 	int i32Len = sendto(SockFd, (char *)sendbuf, tx_len, 0, (const struct sockaddr *)&stTagAddr, sizeof(stTagAddr));
 	if(-1 == i32Len)
@@ -175,4 +231,27 @@ int main()
 		printf("error to send data:errno=%d=>%s\n", errno, strerror(errno));
 		return -1;
 	}
+#endif
+
+
+#if 1
+	int  recv = 0;
+	char buff[PACKET_SIZE];
+	printf("wait recv data\n");
+	while(1)
+	{
+		recv = recvfrom(SockFd, buff, PACKET_SIZE, 0, NULL, NULL);
+		printf("recv :%d \n", recv);
+		if (recv <= 0){
+			printf("recv recv:%d %s\n", recv, strerror(errno));
+			continue;
+		}else{
+			print_string_hex(buff, recv);       
+		}
+	}
+
+#endif
+
+	close(SockFd);
+
 }
